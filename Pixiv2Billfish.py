@@ -1,9 +1,9 @@
 # -*- encoding: utf-8 -*-
 '''
-@File    :   pixiv2billfish.py
-@Time    :   2022/07/5 15:07:30
+@File    :   Pixiv2Billfish.py
+@Time    :   2023/01/23 22:39:07
 @Author  :   Ai-Desu
-@Version :   0.1.0
+@Version :   0.1.1
 @Desc    :   将pixiv插画的tag信息写入到Billfish中\
     使得在Billfish中也能通过标签查找自己喜欢的作品
     参考自 @Coder-Sakura 的 pixiv2eagle
@@ -26,15 +26,16 @@ from thread_pool import ThreadPool, callback
 DB_PATH = r"billfish.db"
 
 # 选择使用代理链接
-proxies = {'http': 'http://localhost:prot', 'https': 'http://localhost:prot'}
+useProxies = 1
+proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
 
 # 选择是否写入标签/备注
 WRITE_TAG = 1
 WRITE_NOTE = 1
 
-#跳过的文件数，0为从头开始
+# 跳过的文件数，0为从头开始
 START_FILE_NUM = 0
-#处理多少文件，0为直至结束
+# 处理多少文件，0为直至结束
 END_FILE_NUM = 0
 # 选择是否跳过已有内容的数据
 SKIP = 1
@@ -99,27 +100,50 @@ def baseRequest(options, method="GET", data=None, params=None, retry_num=5):
     }
     baseRequest(options = options)
     """
-    try:
-        response = requests.request(
-            method,
-            options["url"],
-            data=data,
-            params=params,
-            cookies=options.get("cookies", ""),
-            headers=headers,
-            verify=False,
-            timeout=options.get("timeout", 5),
-            proxies=proxies
-        )
-        response.encoding = "utf8"
-        return response
-    except Exception as e:
-        if retry_num > 0:
-            time.sleep(0.5)
-            return baseRequest(options, data, params, retry_num=retry_num - 1)
-        else:
-            logger.info("网络请求出错 url:{}".format(options["url"]))
-            return
+    if useProxies:
+        try:
+            response = requests.request(
+                method,
+                options["url"],
+                data=data,
+                params=params,
+                cookies=options.get("cookies", ""),
+                headers=headers,
+                verify=False,
+                timeout=options.get("timeout", 5),
+                # proxies=proxies
+                proxies=proxies
+            )
+            response.encoding = "utf8"
+            return response
+        except Exception as e:
+            if retry_num > 0:
+                time.sleep(0.5)
+                return baseRequest(options, data, params, retry_num=retry_num - 1)
+            else:
+                logger.info("网络请求出错 url:{}".format(options["url"]))
+                return 0
+    else:
+        try:
+            response = requests.request(
+                method,
+                options["url"],
+                data=data,
+                params=params,
+                cookies=options.get("cookies", ""),
+                headers=headers,
+                verify=False,
+                timeout=options.get("timeout", 5),
+            )
+            response.encoding = "utf8"
+            return response
+        except Exception as e:
+            if retry_num > 0:
+                time.sleep(0.5)
+                return baseRequest(options, data, params, retry_num=retry_num - 1)
+            else:
+                logger.info("网络请求出错 url:{}".format(options["url"]))
+                return 0
 
 
 # 从pixiv获取标签
@@ -132,22 +156,24 @@ def get_tags(pid):
     resp = baseRequest(
         options={"url": f"{temp_url}{pid}"}
     )
-
     if not resp:
-        try:
-            if resp.status_code == 404:
-                logger.error("Error:{}".format('该作品已被删除，或作品ID不存在。'))
-                return ['Error:404']
-        except Exception as e:
-            return []
+        logger.warning("Warning:{}".format(pid + ' 获取信息异常'))
         return []
+    elif resp.status_code == 404:
+        logger.warning("Warning:{}".format(pid + ' 该作品已被删除，或作品ID不存在。'))
+        return ['Error:404']
 
     json_data = json.loads(resp.text)
 
     if not json_data["error"]:
         tags = json_data["body"]["tags"]["tags"]
         # 加入画师名称
-        tag_list = ["Artist:" + json_data["body"]["userName"]]
+        artist = json_data["body"]["userName"]
+        if artist.rfind('@') != -1 and 2 <= artist.rfind('@') <= len(artist) - 3:
+            artist = artist[0:artist.rfind('@')]
+        else:
+            artist = artist
+        tag_list = ["Artist:" + artist]
 
         for i in tags:
             if "translation" in i.keys():
@@ -172,21 +198,27 @@ def get_note(pid):
     resp = baseRequest(
         options={"url": f"{temp_url}{pid}"}
     )
+
     if not resp:
-        try:
-            if resp.status_code == 404:
-                logger.error("Error:{}".format('该作品已被删除，或作品ID不存在。'))
-                return "Error:404"
-        except Exception as e:
-            return ""
+
+        logger.warning("Warning:{}".format(pid + ' 获取信息异常'))
+
         return ""
+    elif resp.status_code == 404:
+        logger.warning("Warning:{}".format(pid + ' 该作品已被删除，或作品ID不存在。'))
+        return "Error:404"
 
     json_data = json.loads(resp.text)
     if not json_data["error"]:
         # 添加标题
         note = "Title:" + json_data["body"]["illustTitle"] + "\r\n"  # 获取标题
         # 添加作者
-        note += "Artist:" + json_data["body"]["userName"] + "\r\n"
+        artist = json_data["body"]["userName"]
+        if artist.rfind('@') != -1 and 2 <= artist.rfind('@') <= len(artist) - 3:
+            artist = artist[0:artist.rfind('@')]
+        else:
+            artist = artist
+        note += "Artist:" + artist + "\r\n"
         # 添加UID
         note += "UID:" + json_data["body"]["userId"] + "\r\n"
         # 添加获取收藏数
@@ -218,8 +250,10 @@ def get_pid(name):
    """
     pid = ""
     # 处理非图片扩展名，防止误识别
-    if name.endswith("jpg") or name.endswith("png") or name.endswith("gif") or name.endswith(
-            "webp") or name.endswith("webm") or name.endswith("zip") or name.endswith("lnk"):
+    if name.endswith("jpg") or name.endswith("png") or name.endswith("gif") or name.endswith("webp") or name.endswith(
+            "webm") or name.endswith("zip") or name.endswith("jpg.lnk") or name.endswith("png.lnk") or name.endswith(
+        "gif.lnk") or name.endswith("webp.lnk") or name.endswith("webm.lnk") or name.endswith("zip.lnk"):
+
         if "-" in name:
             pid = name.split("-")[0]
         elif "_" in name:
@@ -230,7 +264,7 @@ def get_pid(name):
         try:
             int(pid)
         except Exception as e:
-            logger.warning("Exception:{}".format(e))
+            # logger.error("Exception:{}".format(e))
             return ""
         else:
             return pid
@@ -288,10 +322,10 @@ class db_tool:
             if self.connect_db():
                 return
             else:
-                logger.warning("链接数据库失败，请检查数据库内容")
+                logger.error("链接数据库失败，请检查数据库内容")
                 exit()
         else:
-            logger.warning("<DB_PATH> 未找到数据库,请检查数据库路径")
+            logger.error("<DB_PATH> 未找到数据库,请检查数据库路径")
             exit()
 
     # 链接数据库
@@ -302,7 +336,7 @@ class db_tool:
                 conn.row_factory = sqlite3.Row
                 return conn
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 return False
 
     # 关闭连接
@@ -325,12 +359,14 @@ class db_tool:
                 if END_FILE_NUM == 0:
                     count = cursor.execute("select count(*) from bf_file").fetchone()
                     count = count[0]
-                    row = cursor.execute("SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(count)).fetchall()
+                    row = cursor.execute(
+                        "SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(count)).fetchall()
                 else:
-                    row = cursor.execute("SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(END_FILE_NUM)).fetchall()
+                    row = cursor.execute("SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(
+                        END_FILE_NUM)).fetchall()
 
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 return self.get_file_name()
             self.close_db(conn)
             if row is not None:
@@ -351,7 +387,7 @@ class db_tool:
             try:
                 row = cursor.execute("SELECT id,name FROM bf_tag").fetchall()
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 return self.get_db_tags()
             self.close_db(conn)
             # tag存在返回tag ID，不存在返回 False
@@ -373,7 +409,7 @@ class db_tool:
             try:
                 row = cursor.execute("SELECT file_id,tag_id FROM bf_tag_join_file").fetchall()
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 return self.get_db_tag_join_file()
             self.close_db(conn)
             if row:
@@ -394,7 +430,7 @@ class db_tool:
             try:
                 row = cursor.execute("SELECT file_id,note FROM bf_material_userdata").fetchall()
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 return self.get_db_note()
             self.close_db(conn)
             if row:
@@ -529,7 +565,7 @@ class pixiv2Billfish:
         self.note_row = self.db_tool.get_db_note()
 
         if self.bf_file is None:
-            logger.warning("数据库为空！")
+            logger.error("数据库为空！")
             exit(0)
 
         for i in self.tag_row:
@@ -562,7 +598,7 @@ class pixiv2Billfish:
                         time.sleep(10)
                     # break
             except Exception as e:
-                logger.warning("Exception:{}".format(e))
+                logger.error("Exception:{}".format(e))
                 FOR_TOOL.close()
             finally:
                 FOR_TOOL.close()
@@ -632,7 +668,7 @@ class pixiv2Billfish:
                     exit()
 
         except Exception as e:
-            logger.warning("Exception:{}".format(e))
+            logger.error("Exception:{}".format(e))
             if flag == "note":
                 NOTE_TOOL.close()
             if flag == "tag":
@@ -680,6 +716,7 @@ class pixiv2Billfish:
             tag_list = get_tags(pid)
 
             if not tag_list:
+                logger.warning(f"<{num}/{self.task_len}> <name> {name} <NULL Tags>")
                 self.tag_count += 1
                 self.tag_pass_count += 1
                 self.done_num += 1
@@ -731,6 +768,7 @@ class pixiv2Billfish:
             note = get_note(pid)
 
             if note == "":
+                logger.warning(f"<{num}/{self.task_len}> <name> {name} <NULL Note>")
                 self.note_count += 1
                 self.note_pass_count += 1
                 self.done_num += 1
@@ -760,15 +798,20 @@ class pixiv2Billfish:
             else:
                 if not self.WRITING_TAG:
                     self.WRITING_TAG = 1
-                    if tag_id_list:
+                    if tag_id_list != []:
                         tag_id = int(tag_id_list[len(tag_id_list) - 1]) + 1
+                        prepare_tag.append({"id": str(tag_id), "name": str(i)})
+                        prepare_tag_join_file.append({"file_id": str(file_id), "tag_id": str(tag_id)})
+                        tag_id_list.append(tag_id)
+                        tag_name_list.append(i)
+                        self.WRITING_TAG = 0
                     else:
                         tag_id = 1
-                    prepare_tag.append({"id": str(tag_id), "name": str(i)})
-                    prepare_tag_join_file.append({"file_id": str(file_id), "tag_id": str(tag_id)})
-                    tag_id_list.append(tag_id)
-                    tag_name_list.append(i)
-                    self.WRITING_TAG = 0
+                        prepare_tag.append({"id": str(tag_id), "name": str(i)})
+                        prepare_tag_join_file.append({"file_id": str(file_id), "tag_id": str(tag_id)})
+                        tag_id_list.append(tag_id)
+                        tag_name_list.append(i)
+                        self.WRITING_TAG = 0
                 else:
                     time.sleep(0.3)
                     self.write_tag_list(file_id, tag_list)
