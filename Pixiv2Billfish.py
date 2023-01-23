@@ -219,7 +219,7 @@ def get_pid(name):
     pid = ""
     # 处理非图片扩展名，防止误识别
     if name.endswith("jpg") or name.endswith("png") or name.endswith("gif") or name.endswith(
-            "webp") or name.endswith("webm") or name.endswith("zip"):
+            "webp") or name.endswith("webm") or name.endswith("zip") or name.endswith("lnk"):
         if "-" in name:
             pid = name.split("-")[0]
         elif "_" in name:
