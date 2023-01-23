@@ -26,7 +26,7 @@
     
     提示：为防止意外，请在Billfish分析完全部图片后，退出Billfish，且备份原数据库文件后再运行本程序。
         程序提供了一个测试用的数据库 `billfish.db`。
-5. 运行程序`python pixiv2eagle.py`
+5. 运行程序`python Pixiv2Billfish.py`
 
 ### 高级内容
 + 作为参考，4200张图片，有效图片约2200张，8线程从零写入标签与备注，运行约8分钟
