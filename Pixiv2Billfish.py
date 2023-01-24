@@ -22,7 +22,7 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from thread_pool import ThreadPool, callback
 
 # Billfish 数据库目录
-# eg.:"C:\pictures\.bf\billfish.db"
+# eg.:"C:/pictures/test/.bf/billfish.db"
 DB_PATH = r"billfish.db"
 
 # 选择使用代理链接
