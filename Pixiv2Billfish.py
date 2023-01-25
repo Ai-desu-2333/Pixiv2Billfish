@@ -1,9 +1,9 @@
 # -*- encoding: utf-8 -*-
 '''
 @File    :   Pixiv2Billfish.py
-@Time    :   2023/01/23 22:39:07
+@Time    :   2023/01/25 15:00:07
 @Author  :   Ai-Desu
-@Version :   0.1.1
+@Version :   0.1.1 fix
 @Desc    :   将pixiv插画的tag信息写入到Billfish中\
     使得在Billfish中也能通过标签查找自己喜欢的作品
     参考自 @Coder-Sakura 的 pixiv2eagle
@@ -22,17 +22,19 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 from thread_pool import ThreadPool, callback
 
 # Billfish 数据库目录
-# eg.:"C:\pictures\.bf\billfish.db"
+# 注意在目录的" "外添加 r
+# eg. DB_PATH = r"C:\pictures\.bf\billfish.db"
 DB_PATH = r"billfish.db"
 
 # 选择使用代理链接
-useProxies = 1
-proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
+# useProxies = 1 使用http代理，useProxies = 0 禁用http代理
+# eg. proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
+useProxies = 0
+proxies = {'http': 'http://host:port', 'https': 'http://host:port'}
 
-# 选择是否写入标签/备注
+# 选择是否写入标签/备注/链接
 WRITE_TAG = 1
 WRITE_NOTE = 1
-
 # 跳过的文件数，0为从头开始
 START_FILE_NUM = 0
 # 处理多少文件，0为直至结束
@@ -40,13 +42,16 @@ END_FILE_NUM = 0
 # 选择是否跳过已有内容的数据
 SKIP = 1
 
-# 多线程
-# TAG_TOOL为标签线程，NOTE_TOOL为备注线程
-TAG_TOOL = ThreadPool(8)
-NOTE_TOOL = ThreadPool(8)
+# TAG_Thread为标签线程，NOTE_Thread为备注线程
+TAG_Thread = 8
+NOTE_Thread = 8
+
+TAG_TOOL = ThreadPool(TAG_Thread)
+NOTE_TOOL = ThreadPool(NOTE_Thread)
 FOR_TOOL = ThreadPool(WRITE_TAG + WRITE_NOTE)
 
 temp_url = "https://www.pixiv.net/ajax/illust/"
+origin_url = "https://www.pixiv.net/artworks/"
 # HEADERS
 headers = {
     "Host": "www.pixiv.net",
@@ -111,7 +116,6 @@ def baseRequest(options, method="GET", data=None, params=None, retry_num=5):
                 headers=headers,
                 verify=False,
                 timeout=options.get("timeout", 5),
-                # proxies=proxies
                 proxies=proxies
             )
             response.encoding = "utf8"
@@ -121,7 +125,7 @@ def baseRequest(options, method="GET", data=None, params=None, retry_num=5):
                 time.sleep(0.5)
                 return baseRequest(options, data, params, retry_num=retry_num - 1)
             else:
-                logger.info("网络请求出错 url:{}".format(options["url"]))
+                logger.info("网络请求超时 url:{}".format(options["url"]))
                 return 0
     else:
         try:
@@ -142,7 +146,7 @@ def baseRequest(options, method="GET", data=None, params=None, retry_num=5):
                 time.sleep(0.5)
                 return baseRequest(options, data, params, retry_num=retry_num - 1)
             else:
-                logger.info("网络请求出错 url:{}".format(options["url"]))
+                logger.info("网络请求超时 url:{}".format(options["url"]))
                 return 0
 
 
@@ -191,18 +195,16 @@ def get_tags(pid):
 
 def get_note(pid):
     """
-    从pixiv api获取pid illustTitle userName userId bookmarkCount illustComment
+    从pixiv api获取pid illustTitle userName userId illustComment
     :params pid: pixiv插画id
-    :return: "illustTitle userName userId bookmarkCount illustComment" or “”
+    :return: "illustTitle userName userId  illustComment" or “”
     """
     resp = baseRequest(
         options={"url": f"{temp_url}{pid}"}
     )
 
     if not resp:
-
         logger.warning("Warning:{}".format(pid + ' 获取信息异常'))
-
         return ""
     elif resp.status_code == 404:
         logger.warning("Warning:{}".format(pid + ' 该作品已被删除，或作品ID不存在。'))
@@ -221,8 +223,6 @@ def get_note(pid):
         note += "Artist:" + artist + "\r\n"
         # 添加UID
         note += "UID:" + json_data["body"]["userId"] + "\r\n"
-        # 添加获取收藏数
-        note += "BookMark:" + str(json_data["body"]["bookmarkCount"]) + "\r\n"
         # 添加描述
         if json_data["body"]["illustComment"] != "":
             note += "Comment:\r\n" + json_data["body"]["illustComment"]
@@ -308,8 +308,10 @@ def check_note_exist(file_id):
   """
     try:
         id = note_file_id_list.index(file_id)
-        if note_note_list[id] is not None or note_note_list[id] != "":
+        if note_note_list[id] is not None:
             return True
+        else:
+            return False
     except Exception as e:
         return False
 
@@ -326,6 +328,7 @@ class db_tool:
                 exit()
         else:
             logger.error("<DB_PATH> 未找到数据库,请检查数据库路径")
+            logger.error("当前数据库路径为：" + DB_PATH)
             exit()
 
     # 链接数据库
@@ -513,8 +516,8 @@ class db_tool:
             try:
                 self.WRITING_DB = 1
                 for i in prepare_note_join_file:
-                    conn.cursor().execute("INSERT INTO bf_material_userdata (file_id,note) VALUES ('" + str(
-                        i["file_id"]) + "','" + i["note"] + "')")
+                    conn.cursor().execute("INSERT INTO bf_material_userdata (file_id,note,origin) VALUES ('" + str(
+                        i["file_id"]) + "','" + i["note"] + "','" + i["origin"] + "')")
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -558,6 +561,24 @@ class pixiv2Billfish:
         self.WRITING = 0
         self.done_num = 0
         self.db_tool = db_tool()
+
+        logger.debug(f"DB_PATH={DB_PATH}")
+        logger.debug(f"useProxies ={useProxies}")
+        if useProxies:
+            logger.debug(f"proxies ={proxies}")
+        logger.debug(f"WRITE_TAG={WRITE_TAG}")
+        logger.debug(f"WRITE_NOTE={WRITE_NOTE}")
+        logger.debug(f"START_FILE_NUM={START_FILE_NUM}")
+        logger.debug(f"END_FILE_NUM={END_FILE_NUM}")
+        logger.debug(f"SKIP={SKIP}")
+        logger.debug(f"TAG_Thread={TAG_Thread}")
+        logger.debug(f"NOTE_Thread={NOTE_Thread}")
+
+        if not (WRITE_TAG or WRITE_NOTE):
+            logger.error("设置不正确，请检查WRITE_TAG WRITE_NOTE设置！")
+            logger.error(f"当前RITE_TAG={WRITE_TAG} WRITE_NOTE={WRITE_NOTE}")
+            logger.error(f"需确保任意值为1！")
+            exit(0)
 
         self.bf_file = self.db_tool.get_file_name()
         self.tag_row = self.db_tool.get_db_tags()
@@ -776,7 +797,8 @@ class pixiv2Billfish:
 
         # 写入
         if note:
-            self.write_note_list(id, note)
+            origin = origin_url + pid
+            self.write_note_list(id, note, origin)
             self.write_note_join_file_db(False)
             self.note_success_count += 1
         time.sleep(0.1)
@@ -816,13 +838,15 @@ class pixiv2Billfish:
                     time.sleep(0.3)
                     self.write_tag_list(file_id, tag_list)
 
-    def write_note_list(self, file_id, note):
+    def write_note_list(self, file_id, note, origin):
         """
         写入临时备注，'prepare_note_join_file'
         :params file_id: file_id
         :params note: 将要写入的备注
+        :params origin: 原图链接
         """
-        prepare_note_join_file.append({"file_id": file_id, "note": note})
+
+        prepare_note_join_file.append({"file_id": file_id, "note": note, "origin": origin})
 
     def write_tag_in_db(self, flag):
         if (len(prepare_tag) >= 20 or flag) and not self.WRITING:
