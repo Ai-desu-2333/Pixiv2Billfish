@@ -5,7 +5,7 @@
 
 + 灵感来自于[@Coder-Sakura](https://github.com/Coder-Sakura) 的 [pixiv2eagle](https://github.com/WriteCode-ChangeWorld/Tools/tree/master/0x09-Pixiv%E6%8F%92%E7%94%BBtag%E6%95%B0%E6%8D%AE%E5%AF%BC%E5%85%A5Eagle)
 + 现在可以使用`Pixiv2Billfish`为`Billfish`内的`pixiv`插画添加`标签`和`备注`，从而更好地建造、管理、筛选自己的`pixiv`插画数据库（涩图库）
-
++ 现已支持Billfish 3.0+版本数据库（下称V2版数据库）
 ### 效果预览
 
 ![img.png](Images/img2.png)
@@ -43,9 +43,9 @@
     
    ` eg. 114514_p1.png , 114514.jpg , 114514_ugoira.gif 114514_p3_ugoira.webp`等格式的文件名，都会被本程序处理。
 
-    具体可在 `get_pid` 函数下进行设置，针对billfish的索引模式，也添加了支持(#1)
+    具体可在 `get_pid` 函数下进行设置，针对billfish的索引模式，也添加了支持([#1](https://github.com/Ai-desu-2333/Pixiv2Billfish/issues/1))
 
-+ `标签`会以`Artist:name`形式添加作者名，以方便查找到作者
++ `标签`会以`Artist:ID`形式添加作者名，以方便查找到作者
 + `备注`格式如下:
     ```
     Title:标题
@@ -53,12 +53,16 @@
     Aritst:作者
     
     UID:作者UID
+
+    Bookmark:收藏数
     
     Comment:原图描述
     ```
   
   + Comment中的内容，会对一些html语法进行过滤，以更加直观，详情见 `get_note` 函数
-  + 目前，也会对图片添加原图地址（#2）
+  + 目前，也会对图片添加原图地址([#2](https://github.com/Ai-desu-2333/Pixiv2Billfish/issues/2))
+  + 现在会自动识别素材数据库版本
+    + 在V2版数据库中`Artist:ID`标签会被更改为`ID`形式，并作为`Artist`标签的子标签存在[^3]
 + 针对已经404的图片，标签与备注将会添加`Error:404`以作标注
 + 代码中设置了`WRITE_TAG` `WRITE_NOTE`参数，前者决定是否写入标签，后者决定是否写入备注(添加原图地址功能被包含在写入备注中)，可选值`0(False)`,`1(True)`
 + 为提高运行效率，设置了 `SKIP` 参数，可以跳过已有标签/备注的图片[^1]，可选值`0(False)`,`1(True)`
@@ -70,6 +74,8 @@
 [^1]: `SKIP = 0`时，程序并不会删除数据库中已经存在的内容，而是直接添加，基于SQLlite的特性，标签中重复的添加将被直接略过，备注的添加将视为更新
 
 [^2]: 不确定这样的实现方法是否合理，但是它跑起来了
+
+[^3]: 如果素材库为旧版本升级而来，且已有相关格式（`Artist:ID`）的TAG，会被自动修改
 ### 其他
 本人代码水平比较渣，故本程序中可能存在较多代码不规范，实现繁琐之处，也可能存在诸多BUG，欢迎交流改进
 

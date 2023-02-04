@@ -1,9 +1,9 @@
 # -*- encoding: utf-8 -*-
 '''
 @File    :   Pixiv2Billfish.py
-@Time    :   2023/01/25 15:00:07
+@Time    :   2023/02/4 15:13:37
 @Author  :   Ai-Desu
-@Version :   0.1.1 fix
+@Version :   0.1.2
 @Desc    :   将pixiv插画的tag信息写入到Billfish中\
     使得在Billfish中也能通过标签查找自己喜欢的作品
     参考自 @Coder-Sakura 的 pixiv2eagle
@@ -160,11 +160,15 @@ def get_tags(pid):
     resp = baseRequest(
         options={"url": f"{temp_url}{pid}"}
     )
-    if not resp:
+    if resp == 0:
         logger.warning("Warning:{}".format(pid + ' 获取信息异常'))
+        logger.warning(f"pid:{pid}  resp:{resp}")
+        logger.warning("如果resp=0 大概率是请求过于频繁，可多尝试几次")
         return []
     elif resp.status_code == 404:
-        logger.warning("Warning:{}".format(pid + ' 该作品已被删除，或作品ID不存在。'))
+        json_data = json.loads(resp.text)
+        logger.warning("Warning:{}".format(pid + ' Error:404'))
+        logger.warning(f"Warning: pid:{pid}  Massage:{json_data['message']}")
         return ['Error:404']
 
     json_data = json.loads(resp.text)
@@ -175,8 +179,11 @@ def get_tags(pid):
         artist = json_data["body"]["userName"]
         if artist.rfind('@') != -1 and 2 <= artist.rfind('@') <= len(artist) - 3:
             artist = artist[0:artist.rfind('@')]
+        elif artist.rfind('＠') != -1 and 2 <= artist.rfind('＠') <= len(artist) - 3:
+            artist = artist[0:artist.rfind('＠')]
         else:
             artist = artist
+        # 为方便添加父标签，Artist 仍会处理成 ‘Artist:ID’ 形式，将在处理完毕时统一去除 ‘Artist:’
         tag_list = ["Artist:" + artist]
 
         for i in tags:
@@ -190,6 +197,7 @@ def get_tags(pid):
             tag_list_r.append(i)
         return list(set(tag_list_r))
     else:
+        logger.warning("Warning:{}".format(pid + json_data["message"]))
         return []
 
 
@@ -203,11 +211,15 @@ def get_note(pid):
         options={"url": f"{temp_url}{pid}"}
     )
 
-    if not resp:
+    if resp == 0:
         logger.warning("Warning:{}".format(pid + ' 获取信息异常'))
+        logger.warning(f"pid:{pid}  resp:{resp}")
+        logger.warning("如果resp=0 大概率是请求过于频繁，可多尝试几次")
         return ""
     elif resp.status_code == 404:
-        logger.warning("Warning:{}".format(pid + ' 该作品已被删除，或作品ID不存在。'))
+        json_data = json.loads(resp.text)
+        logger.warning("Warning:{}".format(pid + ' Error:404'))
+        logger.warning(f"Warning: pid:{pid}  Massage:{json_data['message']}")
         return "Error:404"
 
     json_data = json.loads(resp.text)
@@ -223,6 +235,10 @@ def get_note(pid):
         note += "Artist:" + artist + "\r\n"
         # 添加UID
         note += "UID:" + json_data["body"]["userId"] + "\r\n"
+
+        # 添加Bookmark
+        note += "Bookmark:" + str(json_data["body"]["bookmarkCount"]) + "\r\n"
+
         # 添加描述
         if json_data["body"]["illustComment"] != "":
             note += "Comment:\r\n" + json_data["body"]["illustComment"]
@@ -271,12 +287,20 @@ def get_pid(name):
 
 
 # 检查标签是否存在
-def check_tag_exist(tag_name):
+def check_tag_exist(tag_name, is_v3_db):
     """
    检查标签是否存在
-   :params name: 标签名
+   :params tag_name: 标签名
+   :parma is_v3_db: 是否为3.0版本的新数据库
    :return: bf_tag.id or False
    """
+    # 针对Artist标签，测试 Artist:ID 和 ID 两种形式
+    if is_v3_db and "Artist:" in tag_name:
+        try:
+            index = tag_name_list.index(tag_name[7:])
+            return tag_id_list[index]
+        except Exception as e:
+            None
     try:
         index = tag_name_list.index(tag_name)
         return tag_id_list[index]
@@ -349,6 +373,26 @@ class db_tool:
         except Exception as e:
             time.sleep(0.3)
 
+    #识别数据库版本
+    def is_db_ver_3(self):
+        """
+        尝试读取数据库 中的 bf_tag_v2 表来判断所使用billfish版本
+        :return: True or False
+        """
+        conn = self.connect_db()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                row = cursor.execute("SELECT * FROM sqlite_master WHERE type = 'table' AND tbl_name = 'bf_tag_v2';").fetchall()
+            except Exception as e:
+                logger.error("Exception:{}".format(e))
+                return self.is_db_ver_3()
+            self.close_db(conn)
+            if row:
+                return True
+            else:
+                 return False
+
     # 从数据库获取文件名
     def get_file_name(self):
         """
@@ -383,15 +427,23 @@ class db_tool:
             return self.get_file_name()
 
     # 从数据库获取标签
-    def get_db_tags(self):
+    def get_db_tags(self, is_v3_db):
+        """
+        读取标签 bf_tag.id
+                bf_tag.name
+        :parma is_v3_db: 是否为3.0版本的新数据库
+        """
         conn = self.connect_db()
         if conn:
             cursor = conn.cursor()
             try:
-                row = cursor.execute("SELECT id,name FROM bf_tag").fetchall()
+                if is_v3_db:
+                    row = cursor.execute("SELECT id,name FROM bf_tag_v2").fetchall()
+                else:
+                    row = cursor.execute("SELECT id,name FROM bf_tag").fetchall()
             except Exception as e:
                 logger.error("Exception:{}".format(e))
-                return self.get_db_tags()
+                return self.get_db_tags(is_v3_db)
             self.close_db(conn)
             # tag存在返回tag ID，不存在返回 False
             if row:
@@ -402,7 +454,7 @@ class db_tool:
             # logger.warning(f"Connect db failed... Try again")
             self.close_db(conn)
             time.sleep(0.3)
-            return self.get_db_tags()
+            return self.get_db_tags(is_v3_db)
 
     # 从数据库获取文件标签
     def get_db_tag_join_file(self):
@@ -446,11 +498,12 @@ class db_tool:
             return self.get_db_note()
 
     # 写入标签
-    def write_tag_db(self, prepare_tag):
+    def write_tag_db(self, prepare_tag, is_v3_db):
         """
         写入标签 bf_tag.id
                 bf_tag.name
         :param prepare_tag: 缓存的tag
+        :parma is_v3_db: 是否为3.0版本的新数据库
         """
         conn = self.connect_db()
         if conn and not self.WRITING_DB:
@@ -458,7 +511,10 @@ class db_tool:
             try:
                 self.WRITING_DB = 1
                 for i in prepare_tag:
-                    cursor.execute("INSERT INTO bf_tag (id,name) VALUES ('" + i["id"] + "','" + i["name"] + "')")
+                    if is_v3_db:
+                        cursor.execute("INSERT INTO bf_tag_v2 (id,name) VALUES ('" + i["id"] + "','" + i["name"] + "')")
+                    else:
+                        cursor.execute("INSERT INTO bf_tag (id,name) VALUES ('" + i["id"] + "','" + i["name"] + "')")
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -467,10 +523,10 @@ class db_tool:
                 self.close_db(conn)
                 self.WRITING_DB = 0
                 logger.info("Exception:{}".format(e))
-                return self.write_tag_db(prepare_tag)
+                return self.write_tag_db(prepare_tag,is_v3_db)
         else:
             time.sleep(0.3)
-            return self.write_tag_db(prepare_tag)
+            return self.write_tag_db(prepare_tag,is_v3_db)
 
     # 写入文件标签
     def write_tag_join_file_db(self, prepare_tag_join_file):
@@ -532,6 +588,107 @@ class db_tool:
             self.close_db(conn)
             return self.write_note(prepare_note_join_file)
 
+    # 获取Artist标签
+    def get_artist_id(self):
+        """
+        获取Artist这个父标签的ID，如果不存在，则调用create_artist_tag创建
+        :return Artist.id
+        """
+        conn = self.connect_db()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                row = cursor.execute("SELECT id FROM bf_tag_v2 WHERE name='Artist'").fetchall()
+            except Exception as e:
+                logger.error("Exception:{}".format(e))
+                return self.get_artist_id()
+            self.close_db(conn)
+            if row:
+                return row[0]["id"]
+            else:
+                return self.create_artist_tag()
+        else:
+            # logger.warning(f"Connect db failed... Try again")
+            self.close_db(conn)
+            time.sleep(0.3)
+            return self.get_artist_id()
+
+    # 创建Artist标签
+    def create_artist_tag(self):
+        """
+        创建Artist 这个父标签，且创建后使用get_artist_id返回Artist.id
+        :return Artist.id
+        """
+        conn = self.connect_db()
+        if conn and not self.WRITING_DB:
+            cursor = conn.cursor()
+            try:
+                self.WRITING_DB = 1
+                cursor.execute("INSERT INTO bf_tag_v2 (name) VALUES ('Artist')")
+                conn.commit()
+                self.WRITING_DB = 0
+                self.close_db(conn)
+                return self.get_artist_id()
+            except Exception as e:
+                self.close_db(conn)
+                self.WRITING_DB = 0
+                logger.info("Exception:{}".format(e))
+                return self.create_artist_tag()
+            self.close_db(conn)
+        else:
+            time.sleep(0.3)
+            return self.create_artist_tag()
+
+    # 查询Artist:id
+    def get_artists_id(self):
+        """
+        获取Artist:ID格式，且未加入Artist的标签
+        :return Artists list
+        """
+        conn = self.connect_db()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                row = cursor.execute("SELECT * FROM bf_tag_v2 WHERE name like 'Artist:%' AND (pid is NULL or pid = 0)").fetchall()
+            except Exception as e:
+                logger.error("Exception:{}".format(e))
+                return self.get_artists_id()
+            self.close_db(conn)
+            if row:
+                return row
+            else:
+                return []
+        else:
+            # logger.warning(f"Connect db failed... Try again")
+            self.close_db(conn)
+            time.sleep(0.3)
+            return self.get_artists_id()
+
+    # 更新artist tag
+    def update_artist_tag(self, artistlist):
+        """
+        针对3.0版本数据库，将作者tag从Artist:id修改为 id 并加入Artist父标签下
+        :param artistlist: 作者tag表
+        """
+        conn = self.connect_db()
+        if conn and not self.WRITING_DB:
+            cursor = conn.cursor()
+            try:
+                self.WRITING_DB = 1
+                for i in artistlist:
+                    cursor.execute("UPDATE bf_tag_v2 SET name = '" + i["name"] + "' , pid = '" + i["pid"] + "' WHERE id = '" + i["id"] + "'")
+                conn.commit()
+                self.WRITING_DB = 0
+                self.close_db(conn)
+                return True
+            except Exception as e:
+                self.close_db(conn)
+                self.WRITING_DB = 0
+                logger.info("Exception:{}".format(e))
+                return self.update_artist_tag(artistlist)
+        else:
+            time.sleep(0.3)
+            return self.update_artist_tag(artistlist)
 
 class pixiv2Billfish:
     # 计数
@@ -580,8 +737,10 @@ class pixiv2Billfish:
             logger.error(f"需确保任意值为1！")
             exit(0)
 
+        self.is_v3_db = self.db_tool.is_db_ver_3()
+
         self.bf_file = self.db_tool.get_file_name()
-        self.tag_row = self.db_tool.get_db_tags()
+        self.tag_row = self.db_tool.get_db_tags(self.is_v3_db)
         self.tag_file_row = self.db_tool.get_db_tag_join_file()
         self.note_row = self.db_tool.get_db_note()
 
@@ -673,6 +832,21 @@ class pixiv2Billfish:
                         if t == WRITE_TAG * 2 + WRITE_NOTE:
                             break
                 break
+            # 针对新版数据库对作者标签进行修改
+            if self.is_v3_db:
+                logger.info("<update_artist_list...>")
+                new_artistlist = []
+                artistlist = self.db_tool.get_artists_id()
+
+                if artistlist:
+                    artistid = self.db_tool.get_artist_id()
+                    if artistid:
+                        for i in artistlist:
+                            name = i["name"][7:]
+                            new_artistlist.append({'id': str(i["id"]), 'name': str(name), 'pid': str(artistid)})
+                        self.db_tool.update_artist_tag(new_artistlist)
+                logger.info("<update_artist_list Success>")
+
         else:
             logger.error("数据库中没有文件")
 
@@ -745,7 +919,7 @@ class pixiv2Billfish:
 
         # 写入
         if tag_list:
-            self.write_tag_list(file_id, tag_list)
+            self.write_tag_list(file_id, tag_list, self.is_v3_db)
             self.write_tag_in_db(False)
             self.write_tag_join_file_db(False)
             self.tag_success_count += 1
@@ -806,14 +980,14 @@ class pixiv2Billfish:
         self.done_num += 1
         self.note_count += 1
 
-    def write_tag_list(self, file_id, tag_list):
+    def write_tag_list(self, file_id, tag_list, is_v3_db):
         """
         写入临时标签，'prepare_tag'
         :params file_id: file_id
         :params tag_list: 将要写入的tag列表
         """
         for i in tag_list:
-            tag_id = check_tag_exist(i)
+            tag_id = check_tag_exist(i, is_v3_db)
             if tag_id:
                 prepare_tag_join_file.append({'file_id': str(file_id), 'tag_id': str(tag_id)})
 
@@ -836,7 +1010,7 @@ class pixiv2Billfish:
                         self.WRITING_TAG = 0
                 else:
                     time.sleep(0.3)
-                    self.write_tag_list(file_id, tag_list)
+                    self.write_tag_list(file_id, tag_list, is_v3_db)
 
     def write_note_list(self, file_id, note, origin):
         """
@@ -851,7 +1025,7 @@ class pixiv2Billfish:
     def write_tag_in_db(self, flag):
         if (len(prepare_tag) >= 20 or flag) and not self.WRITING:
             self.WRITING = 1
-            if self.db_tool.write_tag_db(prepare_tag):
+            if self.db_tool.write_tag_db(prepare_tag, self.is_v3_db):
                 self.WRITING = 0
                 prepare_tag.clear()
                 return True
