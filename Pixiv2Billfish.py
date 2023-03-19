@@ -1,13 +1,13 @@
 # -*- encoding: utf-8 -*-
-'''
+"""
 @File    :   Pixiv2Billfish.py
-@Time    :   2023/02/4 15:13:37
+@Time    :   2023/03/19 23:53:37
 @Author  :   Ai-Desu
-@Version :   0.1.2
+@Version :   0.1.3
 @Desc    :   将pixiv插画的tag信息写入到Billfish中\
     使得在Billfish中也能通过标签查找自己喜欢的作品
     参考自 @Coder-Sakura 的 pixiv2eagle
-'''
+"""
 import json
 import re
 import sqlite3
@@ -15,20 +15,20 @@ import os.path
 import time
 import requests
 from loguru import logger
-# 强制取消警告
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+# 强制取消警告
+requests.packages.urllib3.disable_warnings()
+
 from thread_pool import ThreadPool, callback
 
 # Billfish 数据库目录
 # 注意在目录的" "外添加 r
-# eg. DB_PATH = r"C:\pictures\.bf\billfish.db"
+# e.g. DB_PATH = r"C:\pictures\.bf\billfish.db"
 DB_PATH = r"billfish.db"
 
 # 选择使用代理链接
 # useProxies = 1 使用http代理，useProxies = 0 禁用http代理
-# eg. proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
+# e.g. proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
 useProxies = 0
 proxies = {'http': 'http://host:port', 'https': 'http://host:port'}
 
@@ -193,7 +193,7 @@ def get_tags(pid):
         tag_list = list(set(tag_list))
         tag_list_r = []
         for i in tag_list:
-            i = i.replace("'", "''")
+            # i = i.replace("'", "''")
             tag_list_r.append(i)
         return list(set(tag_list_r))
     else:
@@ -373,7 +373,7 @@ class db_tool:
         except Exception as e:
             time.sleep(0.3)
 
-    #识别数据库版本
+    # 识别数据库版本
     def is_db_ver_3(self):
         """
         尝试读取数据库 中的 bf_tag_v2 表来判断所使用billfish版本
@@ -383,7 +383,8 @@ class db_tool:
         if conn:
             cursor = conn.cursor()
             try:
-                row = cursor.execute("SELECT * FROM sqlite_master WHERE type = 'table' AND tbl_name = 'bf_tag_v2';").fetchall()
+                row = cursor.execute(
+                    "SELECT * FROM sqlite_master WHERE type = 'table' AND tbl_name = 'bf_tag_v2';").fetchall()
             except Exception as e:
                 logger.error("Exception:{}".format(e))
                 return self.is_db_ver_3()
@@ -391,7 +392,7 @@ class db_tool:
             if row:
                 return True
             else:
-                 return False
+                return False
 
     # 从数据库获取文件名
     def get_file_name(self):
@@ -407,10 +408,10 @@ class db_tool:
                     count = cursor.execute("select count(*) from bf_file").fetchone()
                     count = count[0]
                     row = cursor.execute(
-                        "SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(count)).fetchall()
+                        "SELECT id , name FROM bf_file limit ?,?", (str(START_FILE_NUM), str(count))).fetchall()
                 else:
-                    row = cursor.execute("SELECT id , name FROM bf_file limit " + str(START_FILE_NUM) + "," + str(
-                        END_FILE_NUM)).fetchall()
+                    row = cursor.execute("SELECT id , name FROM bf_file limit ?,?", (str(START_FILE_NUM), str(
+                        END_FILE_NUM))).fetchall()
 
             except Exception as e:
                 logger.error("Exception:{}".format(e))
@@ -512,9 +513,9 @@ class db_tool:
                 self.WRITING_DB = 1
                 for i in prepare_tag:
                     if is_v3_db:
-                        cursor.execute("INSERT INTO bf_tag_v2 (id,name) VALUES ('" + i["id"] + "','" + i["name"] + "')")
+                        cursor.execute("INSERT INTO bf_tag_v2 (id,name) VALUES(?, ?)", (i["id"], i["name"]))
                     else:
-                        cursor.execute("INSERT INTO bf_tag (id,name) VALUES ('" + i["id"] + "','" + i["name"] + "')")
+                        cursor.execute("INSERT INTO bf_tag (id,name) VALUES(?, ?)", (i["id"], i["name"]))
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -523,10 +524,10 @@ class db_tool:
                 self.close_db(conn)
                 self.WRITING_DB = 0
                 logger.info("Exception:{}".format(e))
-                return self.write_tag_db(prepare_tag,is_v3_db)
+                return self.write_tag_db(prepare_tag, is_v3_db)
         else:
             time.sleep(0.3)
-            return self.write_tag_db(prepare_tag,is_v3_db)
+            return self.write_tag_db(prepare_tag, is_v3_db)
 
     # 写入文件标签
     def write_tag_join_file_db(self, prepare_tag_join_file):
@@ -543,8 +544,7 @@ class db_tool:
                 self.WRITING_DB = 1
                 for i in prepare_tag_join_file:
                     cursor.execute(
-                        "INSERT INTO bf_tag_join_file (file_id,tag_id) VALUES ('" + i["file_id"] + "','" + i[
-                            "tag_id"] + "')")
+                        "INSERT INTO bf_tag_join_file (file_id,tag_id) VALUES (?,?)", (i["file_id"], i["tag_id"]))
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -572,8 +572,8 @@ class db_tool:
             try:
                 self.WRITING_DB = 1
                 for i in prepare_note_join_file:
-                    conn.cursor().execute("INSERT INTO bf_material_userdata (file_id,note,origin) VALUES ('" + str(
-                        i["file_id"]) + "','" + i["note"] + "','" + i["origin"] + "')")
+                    conn.cursor().execute("INSERT INTO bf_material_userdata (file_id,note,origin) VALUES (?,?,?)",
+                                          (str(i["file_id"]), i["note"], i["origin"]))
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -649,7 +649,8 @@ class db_tool:
         if conn:
             cursor = conn.cursor()
             try:
-                row = cursor.execute("SELECT * FROM bf_tag_v2 WHERE name like 'Artist:%' AND (pid is NULL or pid = 0)").fetchall()
+                row = cursor.execute(
+                    "SELECT * FROM bf_tag_v2 WHERE name like 'Artist:%' AND (pid is NULL or pid = 0)").fetchall()
             except Exception as e:
                 logger.error("Exception:{}".format(e))
                 return self.get_artists_id()
@@ -676,7 +677,8 @@ class db_tool:
             try:
                 self.WRITING_DB = 1
                 for i in artistlist:
-                    cursor.execute("UPDATE bf_tag_v2 SET name = '" + i["name"] + "' , pid = '" + i["pid"] + "' WHERE id = '" + i["id"] + "'")
+                    cursor.execute(
+                        "UPDATE bf_tag_v2 SET name = ? , pid = ?  WHERE id = ? ", (i["name"], i["pid"], i["id"]))
                 conn.commit()
                 self.WRITING_DB = 0
                 self.close_db(conn)
@@ -689,6 +691,7 @@ class db_tool:
         else:
             time.sleep(0.3)
             return self.update_artist_tag(artistlist)
+
 
 class pixiv2Billfish:
     # 计数
